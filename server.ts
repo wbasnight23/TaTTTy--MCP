@@ -47,111 +47,53 @@ export function createServer(): McpServer {
     },
     async ({ prompt, aspect_ratio }) => {
       const apiToken = process.env.REPLICATE_API_TOKEN;
-      if (!apiToken) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                error: "REPLICATE_API_TOKEN environment variable is not set.",
-              }),
-            },
-          ],
-        };
-      }
 
       const fullPrompt = prompt
         ? `${TRIGGER_WORD} ${prompt}`
         : `${TRIGGER_WORD} a bold blackwork tattoo design with intricate details`;
 
-      try {
-        // Start the prediction
-        const createRes = await fetch(
-          "https://api.replicate.com/v1/predictions",
+      // Start the prediction
+      const createRes = await fetch(
+        "https://api.replicate.com/v1/predictions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+            "Content-Type": "application/json",
+            Prefer: "wait",
+          },
+          body: JSON.stringify({
+            version: MODEL_VERSION,
+            input: {
+              prompt: fullPrompt,
+              aspect_ratio: aspect_ratio ?? "1:1",
+              model: "dev",
+            },
+          }),
+        }
+      );
+
+      const prediction = (await createRes.json()) as {
+        id: string;
+        status: string;
+        output?: string[];
+        error?: string;
+      };
+
+      return {
+        content: [
           {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiToken}`,
-              "Content-Type": "application/json",
-              Prefer: "wait",
-            },
-            body: JSON.stringify({
-              version: MODEL_VERSION,
-              input: {
-                prompt: fullPrompt,
-                aspect_ratio: aspect_ratio ?? "1:1",
-                model: "dev",
-              },
+            type: "text",
+            text: JSON.stringify({
+              status: prediction.status,
+              imageUrl: prediction.output?.[0] ?? null,
+              prompt: fullPrompt,
+              aspect_ratio: aspect_ratio ?? "1:1",
+              predictionId: prediction.id,
             }),
-          }
-        );
-
-        const prediction = (await createRes.json()) as {
-          id: string;
-          status: string;
-          output?: string[];
-          error?: string;
-          urls?: { get: string };
-        };
-
-        if (prediction.error) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({ error: prediction.error }),
-              },
-            ],
-          };
-        }
-
-        // Poll until complete if not already done
-        let result = prediction;
-        if (result.status !== "succeeded" && result.urls?.get) {
-          for (let i = 0; i < 30; i++) {
-            await new Promise((r) => setTimeout(r, 2000));
-            const pollRes = await fetch(result.urls.get, {
-              headers: { Authorization: `Bearer ${apiToken}` },
-            });
-            result = (await pollRes.json()) as typeof result;
-            if (
-              result.status === "succeeded" ||
-              result.status === "failed" ||
-              result.status === "canceled"
-            ) {
-              break;
-            }
-          }
-        }
-
-        const imageUrl = result.output?.[0] ?? null;
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                status: result.status,
-                imageUrl,
-                prompt: fullPrompt,
-                aspect_ratio: aspect_ratio ?? "1:1",
-                predictionId: result.id,
-              }),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                error: String(err),
-              }),
-            },
-          ],
-        };
-      }
+          },
+        ],
+      };
     }
   );
 
